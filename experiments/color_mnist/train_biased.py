@@ -82,7 +82,7 @@ class PL_model(pl.LightningModule):
         self.log("train_loss_step", loss)
         return {"loss": loss}
 
-    def training_epoch_end(self, outputs):
+    def on_train_epoch_end(self):
         self.log("train_acc_epoch", self.train_acc.compute())
         self.train_acc.reset()
 
@@ -103,7 +103,7 @@ class PL_model(pl.LightningModule):
 
         return {"loss": loss}
 
-    def validation_epoch_end(self, outputs):
+    def on_validation_epoch_end(self):
         self.log("test_acc_epoch", self.test_acc.compute())
         self.test_acc.reset()
 
@@ -216,7 +216,7 @@ def main(args) -> None:
     )
     mylogger = pl_loggers.WandbLogger(  # type: ignore
         project="ceconv-colormnist-new",
-        entity="tudcv",
+        entity="arjunp0710-tu-delft",
         config=vars(args),
         name=run_name,
         save_dir=os.environ["WANDB_DIR"],

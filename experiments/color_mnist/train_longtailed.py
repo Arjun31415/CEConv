@@ -1,4 +1,5 @@
 import argparse
+import inspect
 import math
 import os
 
@@ -24,8 +25,10 @@ class PL_model(pl.LightningModule):
 
         # Logging.
         self.save_hyperparameters()
-        self.train_acc = torchmetrics.Accuracy()
-        self.test_acc = torchmetrics.Accuracy()
+        self.train_acc = torchmetrics.Accuracy(task='multiclass',                                           
+                                     num_classes=30)
+        self.test_acc = torchmetrics.Accuracy(task='multiclass',                                           
+                                     num_classes=30)
         self.preds = torch.tensor([])
         self.gts = torch.tensor([])
 
@@ -82,7 +85,7 @@ class PL_model(pl.LightningModule):
         self.log("train_loss_step", loss)
         return {"loss": loss}
 
-    def training_epoch_end(self, outputs):
+    def on_train_epoch_end(self):
         self.log("train_acc_epoch", self.train_acc.compute())
         self.train_acc.reset()
 
@@ -100,7 +103,7 @@ class PL_model(pl.LightningModule):
 
         return {"loss": loss}
 
-    def validation_epoch_end(self, outputs):
+    def on_validation_epoch_end(self):
         self.log("test_acc_epoch", self.test_acc.compute())
 
         # Log confusion matrix with wandb.
@@ -198,7 +201,7 @@ def main(args) -> None:
     run_name = "longtailed-seed_{}-rotations_{}".format(args.seed, args.rotations)
     mylogger = pl_loggers.WandbLogger(  # type: ignore
         project="ceconv-colormnist-new",
-        entity="tudcv",
+        entity="arjunp0710-tu-delft",
         config=vars(args),
         name=run_name,
         tags=["longtailed"],
@@ -207,8 +210,23 @@ def main(args) -> None:
     lr_monitor = LearningRateMonitor(logging_interval="step")
 
     # Train model.
-    trainer = pl.Trainer.from_argparse_args(
-        args,
+    print(args)
+    # trainer = pl.Trainer.from_argparse_args(
+    #     args,
+    #     logger=mylogger,
+    #     accelerator="gpu" if torch.cuda.is_available() else "cpu",
+    #     devices=1,
+    #     callbacks=[lr_monitor],
+    #     max_epochs=args.epochs,
+    #     log_every_n_steps=40,
+    #     deterministic=(args.seed is not None),
+    #     check_val_every_n_epoch=50,
+    # )
+    trainer_params = inspect.signature(pl.Trainer.__init__).parameters.keys()
+    # Filter args to include only keys that match Trainer parameters
+    trainer_kwargs = {k: v for k, v in vars(args).items() if k in trainer_params}
+    trainer = pl.Trainer(
+        **trainer_kwargs,
         logger=mylogger,
         accelerator="gpu" if torch.cuda.is_available() else "cpu",
         devices=1,

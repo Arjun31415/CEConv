@@ -81,7 +81,7 @@ def gpu_process(gpu, args):
         run_id = args.run_id if args.run_id != "" else None
         wandb.init(
             project="color-equivariance-imagenet",
-            entity="tudcv",
+            entity="arjunp0710-tu-delft",
             config=vars(args),
             id=run_id,
             resume=run_id is not None,
