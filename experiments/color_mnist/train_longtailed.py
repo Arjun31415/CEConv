@@ -145,12 +145,12 @@ class CustomDataset(TensorDataset):
 def getDataset():
     # Load train dataset files.
     train = CustomDataset(
-        torch.load(os.environ["DATA_DIR"] + "/colormnist_longtailed/train.pt"),
+        torch.load(os.environ["DATA_DIR"] + "/luminance_mnist/train.pt", weights_only=False),
         jitter=args.jitter,
         grayscale=args.grayscale,
     )
     test = CustomDataset(
-        torch.load(os.environ["DATA_DIR"] + "/colormnist_longtailed/test.pt"),
+        torch.load(os.environ["DATA_DIR"] + "/luminance_mnist/test.pt", weights_only=False),
         jitter=0.0,
         grayscale=args.grayscale,
     )
@@ -196,6 +196,7 @@ def main(args) -> None:
     # Initialize model.
     model = PL_model(args)
     summary(model.model, (2, 3, 28, 28))
+
 
     # Callbacks and loggers.
     run_name = "longtailed-seed_{}-rotations_{}".format(args.seed, args.rotations)
