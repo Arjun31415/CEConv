@@ -9,6 +9,98 @@ from torch import nn
 from torch.nn.parameter import Parameter
 
 
+# class LearnableHueTransformation(nn.Module):
+#     def __init__(self, rotations: int, init, lambda_orth: float = 10):
+#         super().__init__()
+#         self.rotations = rotations
+#         # self.transformation_matrix = nn.Parameter(
+#         #     torch.eye(3) + 0.01 * torch.randn(3, 3)
+#         # )  # Start close to identity
+#
+#         self.transformation_matrix = nn.Parameter(
+#             init + 0.1 * torch.randn(3, 3)
+#         )  # Start close to identity
+#         self.lambda_orth = lambda_orth  # Regularization strength
+#
+#     def forward(self, x):
+#         """Apply the learned hue transformation"""
+#         return torch.matmul(self.transformation_matrix, x)
+#
+#     def orthogonality_loss(self):
+#         """Encourage learned matrix to be near orthogonal"""
+#         I = torch.eye(
+#             self.transformation_matrix.shape[0],
+#             device=self.transformation_matrix.device,
+#         )
+#         return self.lambda_orth * torch.norm(
+#             self.transformation_matrix @ self.transformation_matrix.T - I, p="fro"
+#         )
+#
+
+
+class LearnableHueTransformation(nn.Module):
+    def __init__(
+        self, rotations: int, axis: torch.types.Tensor, lambda_orth: float = 0
+    ):
+        super().__init__()
+        self.rotations: torch.types.Tensor = torch.nn.Parameter(
+            torch.rand(1) * torch.Tensor(rotations), requires_grad=True
+        )
+        self.axis = torch.nn.Parameter(data=axis, requires_grad=True)
+        # self.transformation_matrix = nn.Parameter(
+        #     torch.eye(3) + 0.01 * torch.randn(3, 3)
+        # )  # Start close to identity
+
+        self.lambda_orth = lambda_orth  # Regularization strength
+        # self.transformation_matrix = nn.Parameter(self.generate_rotation_matrix(
+        #     self.axis, (2 * torch.pi) / self.rotations
+        # ))
+
+    def skew_symmetric(self, u):
+        """
+        Given a 3D vector u, return the skew-symmetric matrix [u]_x
+        """
+        ux, uy, uz = u
+        return torch.tensor(
+            [[0, -uz, uy], [uz, 0, -ux], [-uy, ux, 0]], device=u.device, dtype=u.dtype
+        )
+
+    def generate_rotation_matrix(self, u, theta):
+        """
+        Compute the 3x3 rotation matrix using the concise Rodrigues' formula.
+        Args:
+            u: Tensor of shape (3,) - axis of rotation (not necessarily normalized)
+            theta: Scalar tensor - rotation angle in radians
+        Returns:
+            R: Tensor of shape (3, 3)
+        """
+        u = F.normalize(u, dim=0)  # Ensure u is unit vector
+        I = torch.eye(3, device=u.device)
+        K = self.skew_symmetric(u)  # Cross product matrix [u]_x
+        outer = torch.outer(u, u)  # Outer product u ⊗ u
+
+        R = torch.cos(theta) * I + torch.sin(theta) * K + (1 - torch.cos(theta)) * outer
+        return R
+
+    def forward(self, x):
+        """Apply the learned hue transformation"""
+        trans_matrix = self.generate_rotation_matrix(
+            self.axis, (2 * torch.pi) / self.rotations
+        )
+        return torch.matmul(trans_matrix, x).to(self.device)
+
+    def orthogonality_loss(self):
+        """Encourage learned matrix to be near orthogonal"""
+        # I = torch.eye(
+        #     self.transformation_matrix.shape[0],
+        #     device=self.transformation_matrix.device,
+        # )
+        # return self.lambda_orth * torch.norm(
+        #     self.transformation_matrix @ self.transformation_matrix.T - I, p="fro"
+        # )
+        return torch.Tensor(0).to(self.device)
+
+
 def _get_hue_rotation_matrix(rotations: int) -> torch.Tensor:
     """Returns a 3x3 hue rotation matrix.
 
@@ -52,9 +144,17 @@ def _trans_input_filter(weights, rotations, rotation_matrix) -> torch.Tensor:
     weights_flat = weights_flat.reshape((1, 3, -1))  # [1, 3, c_out*k*k]
 
     # Construct full transformation matrix.
+
+    # rotation_matrix = torch.stack(
+    #     [torch.matrix_power(rotation_matrix, i) for i in range(rotations)], dim=0
+    # )
     rotation_matrix = torch.stack(
-        [torch.matrix_power(rotation_matrix, i) for i in range(rotations)], dim=0
-    )
+        [
+            torch.matrix_power(rotation_matrix, i)
+            for i in range(rotations)
+        ],
+        dim=0,
+    ).to(weights_flat.device)
 
     # Apply transformation to weights.
     # [rotations, 3, 3] * [1, 3, c_out*k*k] --> [rotations, 3, c_out*k*k]
@@ -117,13 +217,20 @@ class CEConv2d(nn.Conv2d):
         kernel_size: typing.Union[int, typing.Tuple[int, int]],
         learnable: bool = False,
         separable: bool = True,
-        **kwargs
+        **kwargs,
     ) -> None:
         self.in_rotations = in_rotations
         self.out_rotations = out_rotations
         self.separable = separable
 
         super().__init__(in_channels, out_channels, kernel_size, **kwargs)
+
+        self.rotations: torch.types.Tensor = torch.nn.Parameter(
+             torch.Tensor(in_rotations), requires_grad=True
+        )
+        self.axis: torch.types.Tensor = torch.nn.Parameter(
+            data=torch.Tensor([1, 2, 1]), requires_grad=True
+        )
 
         # Initialize transformation matrix and weights.
         if in_rotations == 1:
@@ -132,7 +239,10 @@ class CEConv2d(nn.Conv2d):
                 if learnable
                 else _get_hue_rotation_matrix(out_rotations)
             )
-            self.transformation_matrix = Parameter(init, requires_grad=learnable)
+            # self.transformation_matrix = Parameter(init, requires_grad=learnable)
+            # self.transformation_matrix = LearnableHueTransformation(
+            #     axis=torch.rand(3), rotations=self.in_rotations
+            # )
             self.weight = Parameter(
                 torch.Tensor(out_channels, in_channels, 1, *self.kernel_size)
             )
@@ -154,6 +264,34 @@ class CEConv2d(nn.Conv2d):
                 )
 
         self.reset_parameters()
+
+    def skew_symmetric(self, u:torch.types.Tensor):
+        """
+        Given a 3D vector u, return the skew-symmetric matrix [u]_x
+        """
+        ux, uy, uz = u
+        return torch.tensor(
+            [[0, -uz, uy], [uz, 0, -ux], [-uy, ux, 0]], device=u.device, dtype=u.dtype
+        )
+
+    def generate_rotation_matrix(
+        self, u: torch.types.Tensor, theta: torch.types.Tensor
+    ) -> torch.types.Tensor:
+        """
+        Compute the 3x3 rotation matrix using the concise Rodrigues' formula.
+        Args:
+            u: Tensor of shape (3,) - axis of rotation (not necessarily normalized)
+            theta: Scalar tensor - rotation angle in radians
+        Returns:
+            R: Tensor of shape (3, 3)
+        """
+        u = F.normalize(u, dim=0)  # Ensure u is unit vector
+        I = torch.eye(3, device=u.device)
+        K = self.skew_symmetric(u)  # Cross product matrix [u]_x
+        outer = torch.outer(u, u)  # Outer product u ⊗ u
+
+        R = torch.cos(theta) * I + torch.sin(theta) * K + (1 - torch.cos(theta)) * outer
+        return R
 
     def reset_parameters(self) -> None:
         """Initialize parameters."""
@@ -177,8 +315,11 @@ class CEConv2d(nn.Conv2d):
         # Compute full filter weights.
         if self.in_rotations == 1:
             # Apply rotation to input layer filter.
+            transformation_matrix = self.generate_rotation_matrix(
+                self.axis, torch.tensor((2 * torch.pi) / self.out_rotations)
+            )
             tw = _trans_input_filter(
-                self.weight, self.out_rotations, self.transformation_matrix
+                self.weight, self.out_rotations, transformation_matrix
             )
         else:
             # Apply cyclic permutation to hidden layer filter.
@@ -216,4 +357,8 @@ class CEConv2d(nn.Conv2d):
             bias = self.bias.view(1, self.out_channels, 1, 1, 1)
             y = y + bias
 
+        # if self.in_rotations == 1:
+        #     return y, self.transformation_matrix.orthogonality_loss()
+        # else:
+        #     return y
         return y

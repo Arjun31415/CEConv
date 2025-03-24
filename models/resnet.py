@@ -240,8 +240,7 @@ class ResNet(nn.Module):
             ]
         else:
             channels = [
-                int(width / math.sqrt(rotations) * 2**i)
-                for i in range(len(num_blocks))
+                int(width / math.sqrt(rotations) * 2**i) for i in range(len(num_blocks))
             ]
         self.in_planes = channels[0]
         strides = [1, 2, 2, 2]

@@ -126,7 +126,6 @@ def generate_colormnist_biased(std):
 
 
 if __name__ == "__main__":
-
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--std", type=int, default=0, help="std of colormnist colors (default): 0)"

@@ -258,7 +258,6 @@ def main(args) -> None:
 
 
 if __name__ == "__main__":
-
     # Training settings.
     parser = argparse.ArgumentParser()
     parser.add_argument("--bs", type=int, default=250, help="batch size")

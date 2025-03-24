@@ -37,6 +37,7 @@
               pytorch-lightning
               torchinfo
               wandb
+              ruff
             ]
             ++ (with pkgs; [v4l-utils ffmpeg-full]);
         };

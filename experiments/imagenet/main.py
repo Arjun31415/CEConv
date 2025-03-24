@@ -13,6 +13,7 @@ import torch.optim
 import torch.utils.data
 import torch.utils.data.distributed
 import wandb
+from ceconv.ceconv2d import LearnableHueTransformation
 from experiments.imagenet.imagenet_tfrecord import ImageNet_TFRecord
 from models.resnet import *
 from models.resnet_hybrid import *
@@ -22,6 +23,20 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 from torchinfo import summary
 from torchvision.transforms.functional import adjust_hue
 
+
+def get_hue_layers(model):
+        return [module for module in model.modules() if isinstance(module, LearnableHueTransformation)]
+
+class CustomLoss(nn.Module):
+    def __init__(self, model, main_loss_fn):
+        super().__init__()
+        self.main_loss_fn = main_loss_fn
+        self.hue_layers = get_hue_layers(model)  # Collect layers once
+        
+    def forward(self, model_output, target):
+        main_loss = self.main_loss_fn(model_output, target)
+        ortho_loss = sum(layer.orthogonality_loss() for layer in self.hue_layers)
+        return main_loss +  ortho_loss
 
 # item() is a recent addition, so this helps with backward compatibility.
 def to_python_float(t):
@@ -129,6 +144,8 @@ def gpu_process(gpu, args):
     assert args.arch in model_dict.keys(), "Model not supported"
     model = model_dict[args.arch](**kwargs)
 
+
+
     if gpu == 0:
         summary(model, (2, 3, 224, 224), device="cpu")
 
@@ -160,7 +177,8 @@ def gpu_process(gpu, args):
     model = DDP(model, device_ids=[gpu], output_device=gpu)
 
     # Define loss function (criterion) and optimizer.
-    criterion = nn.CrossEntropyLoss().cuda(gpu)
+    # criterion = nn.CrossEntropyLoss().cuda(gpu)
+    criterion = CustomLoss(model, nn.CrossEntropyLoss())  # Adjust weight as needed
     best_prec1 = 0
 
     # Optionally resume from a checkpoint.
@@ -281,9 +299,7 @@ def gpu_process(gpu, args):
             )
             if epoch == args.epochs - 1:
                 print(
-                    "##Top-1 {0}\n"
-                    "##Top-5 {1}\n"
-                    "##Perf  {2}".format(
+                    "##Top-1 {0}\n##Top-5 {1}\n##Perf  {2}".format(
                         prec1, prec5, args.total_batch_size / total_time.avg
                     )
                 )
@@ -489,7 +505,6 @@ def validate(val_loader, model, criterion, gpu, args):
                 )
             )
 
-
         if args.debug and i == 10:
             break
 
@@ -499,7 +514,9 @@ def validate(val_loader, model, criterion, gpu, args):
         print(f"Prec@1-{s}: {acc.val} ({acc.avg:.3f})")
     if args.classwise:
         print("Class accuracies:")
-        accs = sorted(list([(c, acc.avg) for (c, acc) in class_accs.items()]), key=lambda x: x[0])
+        accs = sorted(
+            list([(c, acc.avg) for (c, acc) in class_accs.items()]), key=lambda x: x[0]
+        )
         print(accs)
 
     supcat_items = list(sup_accs.items())
@@ -768,7 +785,9 @@ if __name__ == "__main__":
 
     # Validation settings
     parser.add_argument(
-        "--classwise", action="store_true", help="report classwise accuracy",
+        "--classwise",
+        action="store_true",
+        help="report classwise accuracy",
     )
 
     args = parser.parse_args()

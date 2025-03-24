@@ -25,10 +25,8 @@ class PL_model(pl.LightningModule):
 
         # Logging.
         self.save_hyperparameters()
-        self.train_acc = torchmetrics.Accuracy(task='multiclass',                                           
-                                     num_classes=30)
-        self.test_acc = torchmetrics.Accuracy(task='multiclass',                                           
-                                     num_classes=30)
+        self.train_acc = torchmetrics.Accuracy(task="multiclass", num_classes=30)
+        self.test_acc = torchmetrics.Accuracy(task="multiclass", num_classes=30)
         self.preds = torch.tensor([])
         self.gts = torch.tensor([])
 
@@ -244,7 +242,6 @@ def main(args) -> None:
 
 
 if __name__ == "__main__":
-
     # Training settings.
     parser = argparse.ArgumentParser()
     parser.add_argument("--bs", type=int, default=256, help="batch size")

@@ -9,7 +9,9 @@ from torch.utils.data import SubsetRandomSampler
 from torch.utils.data.dataloader import DataLoader
 
 
-def normalize(batch: torch.Tensor, grayscale: bool = False, inverse: bool = False) -> torch.Tensor:
+def normalize(
+    batch: torch.Tensor, grayscale: bool = False, inverse: bool = False
+) -> torch.Tensor:
     """Normalize batch of images."""
 
     if not grayscale:
@@ -23,7 +25,9 @@ def normalize(batch: torch.Tensor, grayscale: bool = False, inverse: bool = Fals
     return (batch - mean) / std
 
 
-def get_dataset(args, path=None, download=True, num_workers=4) -> tuple[DataLoader, DataLoader]:
+def get_dataset(
+    args, path=None, download=True, num_workers=4
+) -> tuple[DataLoader, DataLoader]:
     """Get train and test dataloaders."""
 
     # Fix seed
@@ -74,9 +78,7 @@ def get_dataset(args, path=None, download=True, num_workers=4) -> tuple[DataLoad
 
     # Load dataset
     if args.dataset == "caltech101":
-        x_train = datasets.Caltech101(
-            root=path, download=download, transform=tr_train
-        )
+        x_train = datasets.Caltech101(root=path, download=download, transform=tr_train)
         args.classes = x_train.categories
         x_train, x_test = torch.utils.data.random_split(  # type: ignore
             x_train, [math.floor(0.67 * len(x_train)), math.ceil(0.33 * len(x_train))]

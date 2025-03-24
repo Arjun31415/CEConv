@@ -275,7 +275,6 @@ def main(args) -> None:
 
 
 if __name__ == "__main__":
-
     parser = argparse.ArgumentParser()
 
     # Dataset settings.
