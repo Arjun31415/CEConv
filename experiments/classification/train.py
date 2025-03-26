@@ -165,7 +165,7 @@ class PL_model(pl.LightningModule):
                 )
                 self.gts = torch.cat((self.gts, y.cpu()), 0)
 
-    def test_epoch_end(self, outputs):
+    def on_test_epoch_end(self):
         # Log metrics and predictions, and reset metrics.
         columns = ["hue", "acc"]
         test_table = wandb.Table(columns=columns)
