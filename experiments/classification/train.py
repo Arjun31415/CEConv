@@ -1,6 +1,7 @@
 """Image classification experiments for Color Equivariant Convolutional Networks."""
 
 import argparse
+import inspect
 import math
 import os
 
@@ -33,14 +34,16 @@ class PL_model(pl.LightningModule):
         self.gts = torch.tensor([])
 
         # Store accuracy metrics for logging.
-        self.train_acc = torchmetrics.Accuracy()
-        self.test_acc = torchmetrics.Accuracy()
+        self.train_acc = torchmetrics.Accuracy("multiclass", num_classes=10)
+        self.test_acc = torchmetrics.Accuracy("multiclass", num_classes=10)
 
         # Store accuracy metrics for testing.
         self.test_acc_dict = {}
         self.test_jitter = np.linspace(-0.5, 0.5, 37)
         for i in self.test_jitter:
-            self.test_acc_dict["test_acc_{:.4f}".format(i)] = torchmetrics.Accuracy()
+            self.test_acc_dict["test_acc_{:.4f}".format(i)] = torchmetrics.Accuracy(
+                "multiclass", num_classes=10
+            )
 
         # Loss function
         self.criterion = nn.CrossEntropyLoss()
@@ -240,8 +243,12 @@ def main(args) -> None:
     checkpoint_callback = ModelCheckpoint(dirpath=weights_dir, filename=weights_name)
 
     # Train model.
-    trainer = pl.Trainer.from_argparse_args(
-        args,
+
+    trainer_params = inspect.signature(pl.Trainer.__init__).parameters.keys()
+    # Filter args to include only keys that match Trainer parameters
+    trainer_kwargs = {k: v for k, v in vars(args).items() if k in trainer_params}
+    trainer = pl.Trainer(
+        **trainer_kwargs,
         logger=mylogger,
         accelerator="gpu" if torch.cuda.is_available() else "cpu",
         devices=1,

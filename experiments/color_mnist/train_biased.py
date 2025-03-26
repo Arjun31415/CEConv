@@ -1,4 +1,5 @@
 import argparse
+import inspect
 import os
 
 import numpy as np
@@ -24,8 +25,12 @@ class PL_model(pl.LightningModule):
 
         # Logging.
         self.save_hyperparameters()
-        self.train_acc = torchmetrics.Accuracy()
-        self.test_acc = torchmetrics.Accuracy()
+        # self.train_acc = torchmetrics.Accuracy()
+
+        self.train_acc = torchmetrics.Accuracy(task="multiclass", num_classes=10)
+
+        self.test_acc = torchmetrics.Accuracy(task="multiclass", num_classes=10)
+        # self.test_acc = torchmetrics.Accuracy()
         self.preds = torch.Tensor()  # log for confmat
         self.gts = torch.Tensor()  # log for confmat
 
@@ -237,8 +242,12 @@ def main(args) -> None:
     )
 
     # Train model.
-    trainer = pl.Trainer.from_argparse_args(
-        args,
+
+    trainer_params = inspect.signature(pl.Trainer.__init__).parameters.keys()
+    # Filter args to include only keys that match Trainer parameters
+    trainer_kwargs = {k: v for k, v in vars(args).items() if k in trainer_params}
+    trainer = pl.Trainer(
+        **trainer_kwargs,
         logger=mylogger,
         accelerator="gpu" if torch.cuda.is_available() else "cpu",
         devices=1,
