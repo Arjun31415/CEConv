@@ -3,7 +3,7 @@
 import argparse
 import math
 import os
-
+import inspect
 import numpy as np
 import pytorch_lightning as pl
 import torch
@@ -33,14 +33,18 @@ class PL_model(pl.LightningModule):
         self.gts = torch.tensor([])
 
         # Store accuracy metrics for logging.
-        self.train_acc = torchmetrics.Accuracy()
-        self.test_acc = torchmetrics.Accuracy()
+        self.train_acc = torchmetrics.Accuracy(task="multiclass", num_classes=len(args.classes))
+        self.test_acc = torchmetrics.Accuracy(task="multiclass", num_classes=len(args.classes))
 
         # Store accuracy metrics for testing.
         self.test_acc_dict = {}
-        self.test_jitter = np.linspace(-0.5, 0.5, 37)
-        for i in self.test_jitter:
-            self.test_acc_dict["test_acc_{:.4f}".format(i)] = torchmetrics.Accuracy()
+        self.test_luminance_jitter = np.linspace(0.5, 1.5, 11)  # 50% to 150% brightness
+
+        # Init luminance accuracy metrics
+        for scale in self.test_luminance_jitter:
+            key = f"test_acc_lum_{scale:.2f}"
+            self.test_acc_dict[key] = torchmetrics.Accuracy(task="multiclass", num_classes=len(args.classes))
+
 
         # Loss function
         self.criterion = nn.CrossEntropyLoss()
@@ -58,6 +62,7 @@ class PL_model(pl.LightningModule):
             "width": args.width,
             "num_classes": len(args.classes),
             "ce_stages": args.ce_stages,
+            "le_stages": args.le_stages,
         }
         kwargs = {k: v for k, v in kwargs.items() if v is not None}
         self.model = architectures[args.architecture](**kwargs)
@@ -136,56 +141,63 @@ class PL_model(pl.LightningModule):
         self.log("test_acc_epoch", self.test_acc.compute())
         self.test_acc.reset()
 
-    def test_step(self, batch, batch_idx) -> None:
+    def test_step(self, batch, batch_idx):
         x_org, y = batch
 
-        for i in self.test_jitter:
-            # Apply hue shift.
-            x = adjust_hue(x_org, i)
+        # Step 1: Evaluate normally (unmodified images)
+        x = x_org.clone()
 
-            # Normalize images.
+        if args.normalize:
+            x = normalize(x, grayscale=args.grayscale or args.rotations > 1)
+
+        y_pred = self.model(x)
+        self.test_acc.update(y_pred.detach().cpu(), y.cpu())  # ✅ normal test_acc
+
+        # Store predictions for confusion matrix
+        self.preds = torch.cat((self.preds, F.softmax(y_pred, 1).detach().cpu()), 0)
+        self.gts = torch.cat((self.gts, y.cpu()), 0)
+
+        # Step 2: Luminance loop
+        for scale in self.test_luminance_jitter:
+            x_lum = torch.clamp(x_org * scale, 0.0, 1.0)
+
             if args.normalize:
-                x = normalize(x, grayscale=args.grayscale or args.rotations > 1)
+                x_lum = normalize(x_lum, grayscale=args.grayscale or args.rotations > 1)
 
-            # Forward pass and compute loss.
-            y_pred = self.model(x)
+            y_pred_lum = self.model(x_lum)
+            metric_key = f"test_acc_lum_{scale:.2f}"
+            self.test_acc_dict[metric_key].update(y_pred_lum.detach().cpu(), y.cpu())
 
-            # Logging.
-            self.test_acc_dict["test_acc_{:.4f}".format(i)].update(
-                y_pred.detach().cpu(), y.cpu()
-            )
 
-            # If no hue shift, log predictions and ground truth.
-            if int(i) == 0:
-                self.preds = torch.cat(
-                    (self.preds, F.softmax(y_pred, 1).detach().cpu()), 0
-                )
-                self.gts = torch.cat((self.gts, y.cpu()), 0)
+    def on_test_epoch_end(self) -> None:
+        # Log normal test accuracy
+        acc = self.test_acc.compute()
+        self.log("test_acc", acc)  # ✅ shows in wandb as scalar
+        self.test_acc.reset()
 
-    def test_epoch_end(self, outputs):
-        # Log metrics and predictions, and reset metrics.
-        columns = ["hue", "acc"]
+        # Log luminance-shifted test results
+        columns = ["luminance_scale", "acc"]
         test_table = wandb.Table(columns=columns)
 
-        for i in self.test_jitter:
-            test_table.add_data(
-                i, self.test_acc_dict["test_acc_{:.4f}".format(i)].compute().item()
+        for scale in self.test_luminance_jitter:
+            key = f"test_acc_lum_{scale:.2f}"
+            acc_lum = self.test_acc_dict[key].compute().item()
+            test_table.add_data(scale, acc_lum)
+            self.test_acc_dict[key].reset()
+
+        self.logger.experiment.log({"test_luminance_table": test_table})
+
+        # Confusion matrix
+        self.logger.experiment.log({
+            "test_conf_mat": wandb.plot.confusion_matrix(
+                probs=self.preds.numpy(),
+                y_true=self.gts.numpy(),
+                class_names=args.classes,
             )
-            self.test_acc_dict["test_acc_{:.4f}".format(i)].reset()
+        })
 
-        # Log test table with wandb.
-        self.logger.experiment.log({"test_table": test_table})  # type: ignore
-
-        # Log confusion matrix with wandb.
-        self.logger.experiment.log(  # type: ignore
-            {
-                "test_conf_mat": wandb.plot.confusion_matrix(  # type: ignore
-                    probs=self.preds.numpy(),
-                    y_true=self.gts.numpy(),
-                    class_names=args.classes,
-                )
-            }
-        )
+        self.preds = torch.tensor([])
+        self.gts = torch.tensor([])
 
 
 def main(args) -> None:
@@ -197,7 +209,12 @@ def main(args) -> None:
         pl.seed_everything(args.seed, workers=True)
 
     # Get data loaders.
-    trainloader, testloader = get_dataset(args)
+    if args.dataset == "covid19":
+        trainloader, testloader = get_dataset(
+            args, path="/home/ayush/CEConv/data/COVID-19_Radiography_Dataset", download=False
+        )
+    else:
+        trainloader, testloader = get_dataset(args)
     args.steps_per_epoch = len(trainloader)
     args.epochs = math.ceil(args.epochs / args.split)
 
@@ -224,7 +241,7 @@ def main(args) -> None:
         run_name += "-" + args.run_name
     mylogger = pl_loggers.WandbLogger(  # type: ignore
         project="color-equivariance-classification",
-        entity="arjunp0710-tu-delft",
+        entity="ayush-kuruvilla-tu-delft",
         config=vars(args),
         name=run_name,
         save_dir=os.environ["WANDB_DIR"],
@@ -233,25 +250,39 @@ def main(args) -> None:
 
     # Define callback to store model weights.
     weights_dir = os.path.join(
-        os.environ["OUT_DIR"], "color_equivariance/classification/"
+        os.environ["DATA_DIR"], "color_equivariance/classification/"
     )
     os.makedirs(weights_dir, exist_ok=True)
     weights_name = run_name + ".pth.tar"
     checkpoint_callback = ModelCheckpoint(dirpath=weights_dir, filename=weights_name)
 
     # Train model.
-    trainer = pl.Trainer.from_argparse_args(
-        args,
+    #trainer = pl.Trainer.from_argparse_args(
+    #    args,
+    #    logger=mylogger,
+    #    accelerator="gpu" if torch.cuda.is_available() else "cpu",
+    #    devices=1,
+    #    callbacks=[lr_monitor, checkpoint_callback],
+    #    max_epochs=args.epochs,
+    #    log_every_n_steps=10,
+    #    deterministic=(args.seed is not None),
+    #    check_val_every_n_epoch=20,
+    #)
+    trainer_params = inspect.signature(pl.Trainer.__init__).parameters.keys()
+    # Filter args to include only keys that match Trainer parameters
+    trainer_kwargs = {k: v for k, v in vars(args).items() if k in trainer_params}
+    trainer = pl.Trainer(
+        **trainer_kwargs,
+        precision=16,
         logger=mylogger,
         accelerator="gpu" if torch.cuda.is_available() else "cpu",
         devices=1,
-        callbacks=[lr_monitor, checkpoint_callback],
+        callbacks=[lr_monitor],
         max_epochs=args.epochs,
-        log_every_n_steps=10,
+        log_every_n_steps=40,
         deterministic=(args.seed is not None),
-        check_val_every_n_epoch=20,
+        check_val_every_n_epoch=50,
     )
-
     # Get path to latest model weights if they exist.
     if args.resume:
         checkpoint_files = os.listdir(weights_dir)
@@ -310,6 +341,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--resume", dest="resume", action="store_true", help="resume training."
     )
+    parser.add_argument("--le_stages", type=int, default=0, help="Number of luminance-equivariant stages (default: 0)")
 
     parser = PL_model.add_model_specific_args(parser)
 

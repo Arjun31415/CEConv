@@ -48,10 +48,11 @@ class BasicBlock(nn.Module):
     expansion = 1
 
     def __init__(
-        self, in_planes, planes, stride=1, rotations=1, separable=False
+        self, in_planes, planes, stride=1, rotations=1, separable=False, le_stage=True
     ) -> None:
         super(BasicBlock, self).__init__()
-
+        self.le_stage = le_stage
+        self.eps = 1e-6     
         bnlayer = nn.BatchNorm2d if rotations == 1 else nn.BatchNorm3d
         self.bn1 = bnlayer(planes)
         self.bn2 = bnlayer(planes)
@@ -118,10 +119,25 @@ class BasicBlock(nn.Module):
                     bnlayer(self.expansion * planes),
                 )
 
-    def forward(self, x) -> torch.Tensor:
-        out = F.relu(self.bn1(self.conv1(x)))
-        out = self.bn2(self.conv2(out))
-        out += self.shortcut(x)
+    def luminance_scale(self, x):
+        return x.mean(dim=[1, 2, 3], keepdim=True) / (x.mean() + self.eps)
+    
+    def forward(self, x):
+        identity = x
+
+        out = self.conv1(x)
+        out = self.bn1(out)
+        out = F.relu(out)
+
+        out = self.conv2(out)
+        out = self.bn2(out)
+
+        out += self.shortcut(identity)
+
+        if self.le_stage:
+            L = self.luminance_scale(x)
+            out = L * out
+
         out = F.relu(out)
         return out
 
@@ -225,6 +241,7 @@ class ResNet(nn.Module):
         width=64,
         separable=False,
         nopool=False,
+        le_stages=0, 
     ) -> None:
         super(ResNet, self).__init__()
 
@@ -285,6 +302,8 @@ class ResNet(nn.Module):
 
         # Build resblocks
         self.layers = nn.ModuleList([])
+        self.le_stages = le_stages
+        self.le_layers_added = []
         for i in range(len(num_blocks)):
             self.layers.append(
                 self._make_layer(
@@ -310,9 +329,12 @@ class ResNet(nn.Module):
     def _make_layer(self, block, planes, num_blocks, stride, rotations, separable):
         strides = [stride] + [1] * (num_blocks - 1)
         layers = []
-        for stride in strides:
-            layers.append(block(self.in_planes, planes, stride, rotations, separable))
+        for idx, s in enumerate(strides):
+            le_stage = self.le_stages > 0 and len(self.le_layers_added) < self.le_stages
+            layers.append(block(self.in_planes, planes, s, rotations, separable, le_stage=le_stage))
             self.in_planes = planes * block.expansion
+            if le_stage:
+                self.le_layers_added.append(True)
         return nn.Sequential(*layers)
 
     def forward(self, x):
@@ -336,8 +358,8 @@ class ResNet(nn.Module):
         return out
 
 
-def _ResNet(arch, block, layers, pretrained, progress, jitter=False, **kwargs):
-    model = ResNet(block, layers, **kwargs)
+def _ResNet(arch, block, layers, pretrained, progress,le_stages=0, jitter=False, **kwargs):
+    model = ResNet(block, layers, **kwargs, le_stages=le_stages)
     if pretrained:
         # Key is tuple of (layers, rotations, groupcosetmaxpool, separable)
         if jitter:
@@ -358,7 +380,8 @@ def _ResNet(arch, block, layers, pretrained, progress, jitter=False, **kwargs):
     return model
 
 
-def ResNet18(pretrained=False, progress=True, **kwargs):
+def ResNet18(pretrained=False, progress=True, le_stages=0, **kwargs):
+    kwargs["le_stages"] = le_stages
     return _ResNet("resnet18", BasicBlock, [2, 2, 2, 2], pretrained, progress, **kwargs)
 
 
@@ -366,10 +389,10 @@ def ResNet34(pretrained=False, progress=True, **kwargs):
     return _ResNet("resnet34", BasicBlock, [3, 4, 6, 3], pretrained, progress, **kwargs)
 
 
-def ResNet44(pretrained=False, progress=True, **kwargs):
-    kwargs["width"] = kwargs.get("width", 32)  # If width not in kwargs, set to 32.
+def ResNet44(pretrained=False, progress=True, le_stages=0, **kwargs):
+    kwargs["width"] = kwargs.get("width", 32)
+    kwargs["le_stages"] = le_stages
     return _ResNet("resnet44", BasicBlock, [7, 7, 7], pretrained, progress, **kwargs)
-
 
 def ResNet50(pretrained=False, progress=True, **kwargs):
     if pretrained and kwargs.get("width", 64) != 47:

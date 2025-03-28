@@ -24,8 +24,8 @@ python setup.py install
 
 Set the required environment variables:
 ```bash
-export WANDB_DIR = /path/to/wandb/directory  # Store wandb logs here.
-export DATA_DIR = /path/to/data/directory  # Store datasets here.
+export WANDB_DIR = /home/ayush/CEConv/wandb   # Store wandb logs here.
+export DATA_DIR = /home/ayush/CEConv/datasets  # Store datasets here.
 ```
 
 ## How to use
@@ -124,7 +124,9 @@ python -m experiments.classification.train --rotations 3 --groupcosetmaxpool --s
 python -m experiments.classification.train --rotations 3 --groupcosetmaxpool --separable --ce_stages 1 --width 31
 python -m experiments.classification.train --rotations 3 --groupcosetmaxpool --separable --ce_stages 2 --width 30
 ```
-
+python -m experiments.classification.train --rotations 1 --grayscale --dataset 'covid19'  --epochs 50 --bs 32 --test-bs 32 --split 0.8
+python -m experiments.color_mnist.train_longtailed --rotations -1 --planes 20 --grayscale --le_layers 4
+python -m experiments.classification.train --rotations 1 --grayscale --dataset 'covid19'  --epochs 1 --bs 32 --test-bs 32 --split 0.8 --le_stages 4
 ### ImageNet
 The ImageNet training script uses the [NVIDIA DALI](https://github.com/NVIDIA/DALI) library for accelerated data loading.
 
