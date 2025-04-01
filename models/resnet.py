@@ -52,7 +52,7 @@ class BasicBlock(nn.Module):
     ) -> None:
         super(BasicBlock, self).__init__()
         self.le_stage = le_stage
-        self.eps = 1e-6     
+        self.eps = 1e-6
         bnlayer = nn.BatchNorm2d if rotations == 1 else nn.BatchNorm3d
         self.bn1 = bnlayer(planes)
         self.bn2 = bnlayer(planes)
@@ -121,7 +121,7 @@ class BasicBlock(nn.Module):
 
     def luminance_scale(self, x):
         return x.mean(dim=[1, 2, 3], keepdim=True) / (x.mean() + self.eps)
-    
+
     def forward(self, x):
         identity = x
 
@@ -141,6 +141,34 @@ class BasicBlock(nn.Module):
         out = F.relu(out)
         return out
 
+class BasicBlock2(BasicBlock):
+    def __init__(self, in_planes, planes, stride=1, rotations=1, separable=False, le_stage=True):
+        super(BasicBlock2, self).__init__(in_planes, planes, stride, rotations, separable, le_stage)
+
+    def luminance_scale(self, x):
+        # Compute per-image luminance (vector of means for each image in batch)
+        return x.mean(dim=[1, 2, 3], keepdim=True) + self.eps
+
+    def forward(self, x):
+        identity = x
+        L = self.luminance_scale(x)  # Compute per-image luminance (B,1,1,1)
+
+        x_norm = x / L  # Normalize each image before convolution
+
+        out = self.conv1(x_norm)
+        out = self.bn1(out)
+        out = F.relu(out)
+
+        out = self.conv2(out)
+        out = self.bn2(out)
+
+        out += self.shortcut(identity / L)  # Ensure shortcut is also normalized
+
+        if self.le_stage:
+            out = out * L  # Multiply back by luminance
+
+        out = F.relu(out)
+        return out
 
 class Bottleneck(nn.Module):
     expansion = 4
@@ -241,7 +269,7 @@ class ResNet(nn.Module):
         width=64,
         separable=False,
         nopool=False,
-        le_stages=0, 
+        le_stages=0,
     ) -> None:
         super(ResNet, self).__init__()
 

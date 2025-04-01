@@ -67,44 +67,44 @@ class LECNN2(CNN):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         L = self.luminance_scale(x)
-        x = L * self.do(F.relu(self.bn1(self.conv1(x))))
+        x = self.do(F.relu( L *self.bn1(self.conv1(x))))
 
         if self.le_layers > 1:
             L = self.luminance_scale(x)
         else:
             L = 1
-        x = F.relu(self.bn2(self.conv2(x/L)))
-        x = L * self.mp(x)
+        x = F.relu( L *self.bn2(self.conv2(x/L)))
+        x = self.mp(x)
 
         if self.le_layers > 2:
             L = self.luminance_scale(x)
         else:
             L = 1
-        x = L * self.do(F.relu(self.bn3(self.conv3(x/L))))
+        x = self.do(F.relu( L *self.bn3(self.conv3(x/L))))
 
         if self.le_layers > 3:
             L = self.luminance_scale(x)
         else:
             L = 1
-        x = L * self.do(F.relu(self.bn4(self.conv4(x/L))))
+        x = self.do(F.relu( L *self.bn4(self.conv4(x/L))))
 
         if self.le_layers > 4:
             L = self.luminance_scale(x)
         else:
             L = 1
-        x = L * self.do(F.relu(self.bn5(self.conv5(x/L))))
+        x = self.do(F.relu( L *self.bn5(self.conv5(x/L))))
 
         if self.le_layers > 5:
             L = self.luminance_scale(x)
         else:
             L = 1
-        x = L * F.relu(self.bn6(self.conv6(x/L)))
+        x = F.relu( L *self.bn6(self.conv6(x/L)))
 
         if self.le_layers > 6:
             L = self.luminance_scale(x)
         else:
             L = 1
-        x = L * F.relu(self.bn7(self.conv7(x/L)))
+        x =F.relu( L *self.bn7(self.conv7(x/L)))
 
         x = x.view(x.size(0), -1)
         return self.fc(x)
