@@ -55,6 +55,61 @@ class CNN(nn.Module):
         x = x.view(x.size(0), -1)
         return self.fc(x)
 
+class LECNN2(CNN):
+    """Luminance Equivariant Convolutional Neural Network with 7 layers."""
+
+    def __init__(self, planes: int, le_layers: int = 7, num_classes: int = 10) -> None:
+        super().__init__(planes, num_classes)
+        self.eps = 1e-6
+        assert 1 <= le_layers <= 7, "LE stages must be between 1 and 7"
+        self.le_layers = le_layers
+        self.luminance_scale = lambda x: (x.mean(dim=[1, 2, 3], keepdim=True) + self.eps)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        L = self.luminance_scale(x)
+        x = L * self.do(F.relu(self.bn1(self.conv1(x))))
+
+        if self.le_layers > 1:
+            L = self.luminance_scale(x)
+        else:
+            L = 1
+        x = F.relu(self.bn2(self.conv2(x/L)))
+        x = L * self.mp(x)
+
+        if self.le_layers > 2:
+            L = self.luminance_scale(x)
+        else:
+            L = 1
+        x = L * self.do(F.relu(self.bn3(self.conv3(x/L))))
+
+        if self.le_layers > 3:
+            L = self.luminance_scale(x)
+        else:
+            L = 1
+        x = L * self.do(F.relu(self.bn4(self.conv4(x/L))))
+
+        if self.le_layers > 4:
+            L = self.luminance_scale(x)
+        else:
+            L = 1
+        x = L * self.do(F.relu(self.bn5(self.conv5(x/L))))
+
+        if self.le_layers > 5:
+            L = self.luminance_scale(x)
+        else:
+            L = 1
+        x = L * F.relu(self.bn6(self.conv6(x/L)))
+
+        if self.le_layers > 6:
+            L = self.luminance_scale(x)
+        else:
+            L = 1
+        x = L * F.relu(self.bn7(self.conv7(x/L)))
+
+        x = x.view(x.size(0), -1)
+        return self.fc(x)
+
+
 class LECNN(CNN):
     """Luminance Equivariant Convolutional Neural Network with 7 layers."""
 
@@ -67,7 +122,7 @@ class LECNN(CNN):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         L = self.luminance_scale(x)
-        x = L * self.do(F.relu(self.bn1(self.conv1(x))))
+        x = L * self.do(F.relu(self.bn1(self.conv1(x/L))))
 
         if self.le_layers > 1:
             L = self.luminance_scale(x)
