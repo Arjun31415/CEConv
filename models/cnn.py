@@ -55,6 +55,51 @@ class CNN(nn.Module):
         x = x.view(x.size(0), -1)
         return self.fc(x)
 
+class LECNN(CNN):
+    """Luminance Equivariant Convolutional Neural Network with 7 layers."""
+
+    def __init__(self, planes: int,
+                 le_layers: int = 7,
+                 num_classes: int = 10,
+    ) -> None:
+        super().__init__(planes, num_classes)
+        self.eps = 1e-6  # Small constant to avoid division by zero
+
+        assert le_layers >= 1, "LE stages must be >= 1."
+        assert le_layers <= 7, "LE stages must be <= 7."
+        # Lambda function for luminance scaling
+        self.luminance_scale = lambda x: (x.mean(dim=[1, 2, 3], keepdim=True) / (x.mean() + self.eps))
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        L=self.luminance_scale(x)
+        x = L*self.do(F.relu(self.bn1(self.conv1(x))))
+        L=1
+        if(le_layers>1):
+            L=self.luminance_scale(x)
+        x = F.relu(self.bn2(self.conv2(x)))
+        x = L*self.mp(x)
+        L=1
+        if(le_layers>2):
+            L=self.luminance_scale(x)
+        x = L*self.do(F.relu(self.bn3(self.conv3(x))))
+        L=1
+        if(le_layers>3):
+            L=self.luminance_scale(x)
+        x = L*self.do(F.relu(self.bn4(self.conv4(x))))
+        L=1
+        if(le_layers>4):
+            L=self.luminance_scale(x)
+        x = L*self.do(F.relu(self.bn5(self.conv5(x))))
+        L=1
+        if(le_layers>5):
+            L=self.luminance_scale(x)
+        x = L*F.relu(self.bn6(self.conv6(x)))
+        L=1
+        if(le_layers>6):
+            L=self.luminance_scale(x)
+        x = L*F.relu(self.bn7(self.conv7(x)))
+        x = x.view(x.size(0), -1)
+        return self.fc(x)
 
 class CECNN(nn.Module):
     """Color Equivariant Convolutional Neural Network (CECNN) with 7 layers."""
