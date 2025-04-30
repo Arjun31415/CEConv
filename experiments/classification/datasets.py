@@ -23,7 +23,7 @@ def normalize(batch: torch.Tensor, grayscale: bool = False, inverse: bool = Fals
     return (batch - mean) / std
 
 
-def get_dataset(args, path=None, download=True, num_workers=4) -> tuple[DataLoader, DataLoader]:
+def get_dataset(args, path=None, download=True, num_workers=4, is_training=True) -> tuple[DataLoader, DataLoader]:
     """Get train and test dataloaders."""
 
     # Fix seed
@@ -97,6 +97,50 @@ def get_dataset(args, path=None, download=True, num_workers=4) -> tuple[DataLoad
             path, train=False, transform=tr_test, download=download
         )
         args.classes = x_train.classes
+    elif args.dataset == "covid19":
+        class DarkenTransform:
+            def __call__(self, tensor_img):
+                return torch.clamp(tensor_img * 0.5, 0.0, 1.0)
+            
+        # Transform: resize to 299x299, apply basic augmentation for training, no grayscale
+        tr_train = T.Compose([
+            T.Resize((160, 160)),
+            T.RandomHorizontalFlip(),
+            T.RandomRotation(20),
+            T.RandomAffine(degrees=0, translate=(0.2, 0.2), shear=15),
+            T.ToTensor(),
+            DarkenTransform(),
+        ])
+    
+        tr_test = T.Compose([
+            T.Resize((160, 160)),
+            T.ToTensor(),
+        ])
+    
+        # Load dataset with train transform
+        x_dataset = datasets.ImageFolder(
+            root=path,
+            transform=tr_train
+        )
+    
+        # Train/test split
+        total_len = len(x_dataset)
+        indices = torch.randperm(total_len)
+        split = int(args.split * total_len)
+        train_indices = indices[:split]
+        test_indices = indices[split:]
+    
+        x_train = torch.utils.data.Subset(x_dataset, train_indices)
+    
+        # Apply test transform for the test set
+        x_test = torch.utils.data.Subset(
+            datasets.ImageFolder(root=path, transform=tr_test),
+            test_indices
+        )
+    
+        # Save class names
+        args.classes = x_dataset.classes
+        
     elif args.dataset == "flowers102":
         # We train on both the train and val splits as discussed in
         # https://github.com/huggingface/pytorch-image-models/discussions/1282.
@@ -169,5 +213,12 @@ def get_dataset(args, path=None, download=True, num_workers=4) -> tuple[DataLoad
         pin_memory=True,
         persistent_workers=True,
     )
+
+    print(f"\n🗂️ Dataset Stats:")
+    print(f"  Total train samples     : {len(trainloader.dataset)}")
+    print(f"  Total test samples      : {len(testloader.dataset)}")
+    print(f"  Batch size              : {args.bs}")
+    print(f"  Steps per epoch         : {len(trainloader)}")
+    print(f"  Test steps per epoch    : {len(testloader)}\n")
 
     return trainloader, testloader

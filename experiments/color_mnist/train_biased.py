@@ -216,7 +216,7 @@ def main(args) -> None:
     )
     mylogger = pl_loggers.WandbLogger(  # type: ignore
         project="ceconv-colormnist-new",
-        entity="arjunp0710-tu-delft",
+        entity="ayush-kuruvilla-tu-delft",
         config=vars(args),
         name=run_name,
         save_dir=os.environ["WANDB_DIR"],

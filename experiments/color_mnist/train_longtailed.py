@@ -16,7 +16,7 @@ from torch.utils.data.dataloader import DataLoader
 from torch.utils.data import TensorDataset
 from torchinfo import summary
 
-from models.cnn import CECNN, CNN
+from models.cnn import CECNN, CNN, LECNN
 
 
 class PL_model(pl.LightningModule):
@@ -34,11 +34,17 @@ class PL_model(pl.LightningModule):
 
         # Model definition.
         if args.rotations == 1:
+            print("running base cnn")
             self.model = CNN(args.planes, num_classes=30)
-        elif args.rotations > 1:
+        elif args.rotations == -1:
+            print(args.le_layers)
+            print("running lecnn")
+            self.model = LECNN(args.planes, le_layers=args.le_layers, num_classes=30)
+        else:
             self.model = CECNN(
                 args.planes,
                 args.rotations,
+                ce_layers=args.ce_layers,
                 groupcosetmaxpool=args.groupcosetpool,
                 num_classes=30,
                 separable=args.separable,
@@ -54,6 +60,7 @@ class PL_model(pl.LightningModule):
         parser.add_argument("--groupcosetpool", action="store_true", help="cosetpool")
         parser.add_argument("--separable", action="store_true", help="separable CEConv")
         parser.add_argument("--ce_layers", type=int, default=7, help="CECNN layers")
+        parser.add_argument("--le_layers", type=int, default=7, help="Number of luminance-equivariant layers")
         return parent_parser
 
     def configure_optimizers(self):
@@ -145,12 +152,12 @@ class CustomDataset(TensorDataset):
 def getDataset():
     # Load train dataset files.
     train = CustomDataset(
-        torch.load(os.environ["DATA_DIR"] + "/colormnist_longtailed/train.pt"),
+        torch.load(os.environ["DATA_DIR"] + "/luminance_mnist/train.pt", weights_only=False),
         jitter=args.jitter,
         grayscale=args.grayscale,
     )
     test = CustomDataset(
-        torch.load(os.environ["DATA_DIR"] + "/colormnist_longtailed/test.pt"),
+        torch.load(os.environ["DATA_DIR"] + "/luminance_mnist/test.pt", weights_only=False),
         jitter=0.0,
         grayscale=args.grayscale,
     )
@@ -197,14 +204,14 @@ def main(args) -> None:
     model = PL_model(args)
     summary(model.model, (2, 3, 28, 28))
 
+
     # Callbacks and loggers.
     run_name = "longtailed-seed_{}-rotations_{}".format(args.seed, args.rotations)
     mylogger = pl_loggers.WandbLogger(  # type: ignore
         project="ceconv-colormnist-new",
-        entity="arjunp0710-tu-delft",
+        entity="ayush-kuruvilla-tu-delft",
         config=vars(args),
         name=run_name,
-        tags=["longtailed"],
         save_dir=os.environ["WANDB_DIR"],
     )
     lr_monitor = LearningRateMonitor(logging_interval="step")
